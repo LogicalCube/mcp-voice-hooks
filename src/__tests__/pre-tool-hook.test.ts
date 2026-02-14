@@ -186,6 +186,51 @@ describe('Pre-Tool Hook - Table-Driven Tests', () => {
       tool_input: { file_path: '/tmp/test.txt', old_string: 'old', new_string: 'new' },
       expectedDecision: 'ask',
       expectedReason: /not on the allowlist/
+    },
+
+    // Safe commands with destructive text in arguments - should NOT be flagged as destructive
+    {
+      description: 'should not flag gh pr create with "git push --force" in PR body as destructive',
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --title "Fix" --body "mentions git push --force and rm -rf"'
+      },
+      expectedDecision: 'allow',  // gh pr create is on allowlist, and NOT denied as destructive despite text in body
+    },
+    {
+      description: 'should not flag echo with "git reset --hard" as destructive',
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'echo "git reset --hard is a destructive command"'
+      },
+      expectedDecision: 'ask',
+      expectedReason: /not on the allowlist/
+    },
+    {
+      description: 'should not flag cat with heredoc containing "rm -rf" as destructive',
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'cat <<EOF\nDo not run: rm -rf /\nEOF'
+      },
+      expectedDecision: 'ask',
+      expectedReason: /not on the allowlist/
+    },
+    {
+      description: 'should not flag curl as destructive even with destructive text in URL',
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'curl https://example.com/api?action=git+reset+--hard'
+      },
+      expectedDecision: 'allow',  // curl is on allowlist
+    },
+    {
+      description: 'should not flag jq with destructive text in JSON as destructive',
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'echo \'{"command": "git push --force"}\' | jq .'
+      },
+      expectedDecision: 'ask',
+      expectedReason: /not on the allowlist/
     }
   ];
 

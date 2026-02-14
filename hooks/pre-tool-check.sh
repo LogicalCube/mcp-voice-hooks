@@ -38,24 +38,35 @@ is_destructive() {
   if [[ "$tool_name" == "Bash" ]]; then
     local command=$(echo "$tool_input" | jq -r '.command // empty')
 
+    # Get first word of command to determine if it's a potentially destructive tool
+    local first_word=$(echo "$command" | awk '{print $1}')
+
+    # Skip destructive checks for known-safe commands
+    case "$first_word" in
+      gh|npm|curl|cat|echo|grep|sed|awk|jq|head|tail|ls|find|which|whereis)
+        return 1  # Not destructive
+        ;;
+    esac
+
+    # Only check for destructive patterns if command starts with potentially destructive tools
     # Check for destructive patterns
-    if [[ "$command" =~ rm\ +-.*r || "$command" =~ rm\ +-.*f ]]; then
+    if [[ "$command" =~ ^rm\ +-.*[rf] ]]; then
       return 0
     fi
 
-    if [[ "$command" =~ git\ +reset\ +--hard ]]; then
+    if [[ "$command" =~ ^git\ +reset\ +--hard ]]; then
       return 0
     fi
 
-    if [[ "$command" =~ git\ +push\ +--force || "$command" =~ git\ +push\ +-f ]]; then
+    if [[ "$command" =~ ^git\ +push.*(--force|-f) ]]; then
       return 0
     fi
 
-    if [[ "$command" =~ git\ +clean\ +-.*f ]]; then
+    if [[ "$command" =~ ^git\ +clean\ +-.*f ]]; then
       return 0
     fi
 
-    if [[ "$command" =~ git\ +branch\ +-D ]]; then
+    if [[ "$command" =~ ^git\ +branch\ +-D ]]; then
       return 0
     fi
   fi
