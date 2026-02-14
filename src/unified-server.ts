@@ -95,6 +95,10 @@ class UtteranceQueue {
     };
     this.messages.push(message);
     debugLog(`[Queue] assistant message: "${message.text}"	[id: ${message.id}]`);
+
+    // Broadcast SSE event
+    broadcastAssistantMessageAdded(message);
+
     return message;
   }
 
@@ -739,6 +743,18 @@ function broadcastUtteranceDeleted(id: string) {
 // Helper function to broadcast queue cleared event
 function broadcastQueueCleared() {
   broadcastSSE('queue-cleared', {});
+}
+
+// Helper function to broadcast assistant message added event
+function broadcastAssistantMessageAdded(message: ConversationMessage) {
+  broadcastSSE('assistant-message-added', {
+    message: {
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      timestamp: message.timestamp
+    }
+  });
 }
 
 // Helper function to format voice utterances for display

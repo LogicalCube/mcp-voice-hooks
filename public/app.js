@@ -164,6 +164,12 @@ class MessengerClient {
                         this.handleQueueCleared();
                         break;
 
+                    case 'assistant-message-added':
+                        if (data.message) {
+                            this.handleAssistantMessageAdded(data.message);
+                        }
+                        break;
+
                     default:
                         this.debugLog('[SSE] Unknown event type:', data.type);
                 }
@@ -259,6 +265,26 @@ class MessengerClient {
 
         // Show empty state
         this.checkEmptyState();
+    }
+
+    handleAssistantMessageAdded(message) {
+        this.debugLog('[SSE] Assistant message added:', message);
+
+        // Update cache
+        this.conversationCache.set(message.id, {
+            id: message.id,
+            role: 'assistant',
+            text: message.text,
+            timestamp: new Date(message.timestamp)
+        });
+
+        // Add message bubble to conversation
+        this.addMessageBubble({
+            id: message.id,
+            role: 'assistant',
+            text: message.text,
+            timestamp: new Date(message.timestamp)
+        });
     }
 
     checkEmptyState() {
