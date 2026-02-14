@@ -79,6 +79,10 @@ class UtteranceQueue {
     });
 
     debugLog(`[Queue] queued: "${utterance.text}"	[id: ${utterance.id}]`);
+
+    // Broadcast SSE event
+    broadcastUtteranceAdded(utterance);
+
     return utterance;
   }
 
@@ -117,6 +121,9 @@ class UtteranceQueue {
       if (message) {
         message.status = 'delivered';
       }
+
+      // Broadcast SSE event
+      broadcastUtteranceStatusChanged(utterance);
     }
   }
 
@@ -128,6 +135,10 @@ class UtteranceQueue {
       this.utterances = this.utterances.filter(u => u.id !== id);
       this.messages = this.messages.filter(m => m.id !== id);
       debugLog(`[Queue] Deleted pending message: "${utterance.text}"	[id: ${id}]`);
+
+      // Broadcast SSE event
+      broadcastUtteranceDeleted(id);
+
       return true;
     }
 
@@ -139,6 +150,9 @@ class UtteranceQueue {
     this.utterances = [];
     this.messages = []; // Clear conversation history too
     debugLog(`[Queue] Cleared ${count} utterances and conversation history`);
+
+    // Broadcast SSE event
+    broadcastQueueCleared();
   }
 }
 
@@ -580,10 +594,11 @@ app.delete('/api/utterances', (_req: Request, res: Response) => {
   });
 });
 
-// Server-Sent Events for TTS notifications
-const ttsClients = new Set<Response>();
+// Server-Sent Events for real-time updates
+const sseClients = new Set<Response>();
 
-app.get('/api/tts-events', (_req: Request, res: Response) => {
+// Main SSE endpoint for all real-time updates
+app.get('/api/events', (_req: Request, res: Response) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -594,14 +609,15 @@ app.get('/api/tts-events', (_req: Request, res: Response) => {
   res.write('data: {"type":"connected"}\n\n');
 
   // Add client to set
-  ttsClients.add(res);
+  sseClients.add(res);
+  debugLog(`[SSE] Client connected, ${sseClients.size} total client(s)`);
 
   // Remove client on disconnect
   res.on('close', () => {
-    ttsClients.delete(res);
-    
+    sseClients.delete(res);
+
     // If no clients remain, disable voice features
-    if (ttsClients.size === 0) {
+    if (sseClients.size === 0) {
       debugLog('[SSE] Last browser disconnected, disabling voice features');
       if (voicePreferences.voiceInputActive || voicePreferences.voiceResponsesEnabled) {
         debugLog(`[SSE] Voice features disabled - Input: ${voicePreferences.voiceInputActive} -> false, Responses: ${voicePreferences.voiceResponsesEnabled} -> false`);
@@ -609,25 +625,93 @@ app.get('/api/tts-events', (_req: Request, res: Response) => {
         voicePreferences.voiceResponsesEnabled = false;
       }
     } else {
-      debugLog(`[SSE] Browser disconnected, ${ttsClients.size} client(s) remaining`);
+      debugLog(`[SSE] Browser disconnected, ${sseClients.size} client(s) remaining`);
     }
   });
 });
 
+// Backward compatibility: alias /api/tts-events to /api/events
+app.get('/api/tts-events', (_req: Request, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+
+  res.write('data: {"type":"connected"}\n\n');
+  sseClients.add(res);
+
+  res.on('close', () => {
+    sseClients.delete(res);
+
+    if (sseClients.size === 0) {
+      debugLog('[SSE] Last browser disconnected, disabling voice features');
+      if (voicePreferences.voiceInputActive || voicePreferences.voiceResponsesEnabled) {
+        debugLog(`[SSE] Voice features disabled - Input: ${voicePreferences.voiceInputActive} -> false, Responses: ${voicePreferences.voiceResponsesEnabled} -> false`);
+        voicePreferences.voiceInputActive = false;
+        voicePreferences.voiceResponsesEnabled = false;
+      }
+    } else {
+      debugLog(`[SSE] Browser disconnected, ${sseClients.size} client(s) remaining`);
+    }
+  });
+});
+
+// Helper function to broadcast SSE events to all connected clients
+function broadcastSSE(eventType: string, data: any) {
+  const message = JSON.stringify({ type: eventType, ...data });
+  sseClients.forEach(client => {
+    try {
+      client.write(`data: ${message}\n\n`);
+    } catch (error) {
+      debugLog(`[SSE] Error writing to client: ${error}`);
+    }
+  });
+  debugLog(`[SSE] Broadcasted ${eventType} to ${sseClients.size} client(s)`);
+}
+
 // Helper function to notify all connected TTS clients
 function notifyTTSClients(text: string) {
-  const message = JSON.stringify({ type: 'speak', text });
-  ttsClients.forEach(client => {
-    client.write(`data: ${message}\n\n`);
-  });
+  broadcastSSE('speak', { text });
 }
 
 // Helper function to notify all connected clients about wait status
 function notifyWaitStatus(isWaiting: boolean) {
-  const message = JSON.stringify({ type: 'waitStatus', isWaiting });
-  ttsClients.forEach(client => {
-    client.write(`data: ${message}\n\n`);
+  broadcastSSE('waitStatus', { isWaiting });
+}
+
+// Helper function to broadcast utterance added event
+function broadcastUtteranceAdded(utterance: Utterance) {
+  broadcastSSE('utterance-added', {
+    utterance: {
+      id: utterance.id,
+      text: utterance.text,
+      timestamp: utterance.timestamp,
+      status: utterance.status
+    }
   });
+}
+
+// Helper function to broadcast utterance status changed event
+function broadcastUtteranceStatusChanged(utterance: Utterance) {
+  broadcastSSE('utterance-status-changed', {
+    utterance: {
+      id: utterance.id,
+      text: utterance.text,
+      timestamp: utterance.timestamp,
+      status: utterance.status
+    }
+  });
+}
+
+// Helper function to broadcast utterance deleted event
+function broadcastUtteranceDeleted(id: string) {
+  broadcastSSE('utterance-deleted', { id });
+}
+
+// Helper function to broadcast queue cleared event
+function broadcastQueueCleared() {
+  broadcastSSE('queue-cleared', {});
 }
 
 // Helper function to format voice utterances for display
@@ -709,6 +793,9 @@ app.post('/api/speak', async (req: Request, res: Response) => {
       if (message) {
         message.status = 'responded';
       }
+
+      // Broadcast SSE event
+      broadcastUtteranceStatusChanged(u);
     });
 
     lastSpeakTimestamp = new Date();
@@ -788,7 +875,7 @@ app.listen(HTTP_PORT, async () => {
   const autoOpenBrowser = process.env.MCP_VOICE_HOOKS_AUTO_OPEN_BROWSER !== 'false'; // Default to true
   if (IS_MCP_MANAGED && autoOpenBrowser) {
     setTimeout(async () => {
-      if (ttsClients.size === 0) {
+      if (sseClients.size === 0) {
         debugLog('[Browser] No frontend connected, opening browser...');
         try {
           const open = (await import('open')).default;
@@ -798,7 +885,7 @@ app.listen(HTTP_PORT, async () => {
           debugLog('[Browser] Failed to open browser:', error);
         }
       } else {
-        debugLog(`[Browser] Frontend already connected (${ttsClients.size} client(s))`)
+        debugLog(`[Browser] Frontend already connected (${sseClients.size} client(s))`)
       }
     }, 3000);
   }
