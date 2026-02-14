@@ -18,7 +18,7 @@
     "start": "node dist/unified-server.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "prepare": "husky",
+    "prepare": "npm run build && husky",
     "version": "node scripts/sync-plugin-version.cjs && git add plugin/.claude-plugin/plugin.json dev-marketplace/dev-plugin/.claude-plugin/plugin.json",
     "release": "npm version patch && git push --follow-tags"
   },
