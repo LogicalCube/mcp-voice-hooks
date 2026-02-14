@@ -437,33 +437,51 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
   const voiceResponsesEnabled = voicePreferences.voiceResponsesEnabled;
   const voiceInputActive = voicePreferences.voiceInputActive;
 
+  debugLog(`[Hook] ${attemptedAction} - Checking queue (${queue.utterances.length} total utterances)`);
+
   // 1. Check for pending utterances and auto-dequeue
   // Always check for pending utterances regardless of voiceInputActive
   // This allows typed messages to be dequeued even when mic is off
   const pendingUtterances = queue.utterances.filter(u => u.status === 'pending');
+  debugLog(`[Hook] ${attemptedAction} - Found ${pendingUtterances.length} pending utterances`);
+
   if (pendingUtterances.length > 0) {
+    debugLog(`[Hook] ${attemptedAction} - Pending utterance IDs: ${pendingUtterances.map(u => u.id).join(', ')}`);
+    debugLog(`[Hook] ${attemptedAction} - Calling dequeueUtterancesCore()...`);
+
     // Always dequeue (dequeueUtterancesCore no longer requires voiceInputActive)
     const dequeueResult = dequeueUtterancesCore();
+
+    debugLog(`[Hook] ${attemptedAction} - Dequeue result: success=${dequeueResult.success}, count=${dequeueResult.utterances?.length || 0}`);
 
     if (dequeueResult.success && dequeueResult.utterances && dequeueResult.utterances.length > 0) {
       // Reverse to show oldest first
       const reversedUtterances = dequeueResult.utterances.reverse();
 
+      debugLog(`[Hook] ${attemptedAction} - BLOCKING with ${reversedUtterances.length} utterances`);
       return {
         decision: 'block',
         reason: formatVoiceUtterances(reversedUtterances)
       };
+    } else {
+      debugLog(`[Hook] ${attemptedAction} - Dequeue failed or returned no utterances, continuing to next check`);
     }
+  } else {
+    debugLog(`[Hook] ${attemptedAction} - No pending utterances found, continuing to next check`);
   }
 
   // 2. Check for delivered utterances (when voice enabled)
   if (voiceResponsesEnabled) {
     const deliveredUtterances = queue.utterances.filter(u => u.status === 'delivered');
+    debugLog(`[Hook] ${attemptedAction} - Voice responses enabled, found ${deliveredUtterances.length} delivered utterances`);
+
     if (deliveredUtterances.length > 0) {
       // Only allow speak to proceed
       if (attemptedAction === 'speak') {
+        debugLog(`[Hook] ${attemptedAction} - Approving speak action despite delivered utterances`);
         return { decision: 'approve' };
       }
+      debugLog(`[Hook] ${attemptedAction} - BLOCKING due to unresponded delivered utterances`);
       return {
         decision: 'block',
         reason: `${deliveredUtterances.length} delivered utterance(s) require voice response. Please use the speak tool to respond before proceeding.`
@@ -484,9 +502,13 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
 
   // 5. Handle stop
   if (attemptedAction === 'stop') {
+    debugLog(`[Hook] stop - voiceInputActive=${voiceInputActive}, voiceResponsesEnabled=${voiceResponsesEnabled}`);
+    debugLog(`[Hook] stop - lastToolUseTimestamp=${lastToolUseTimestamp?.toISOString()}, lastSpeakTimestamp=${lastSpeakTimestamp?.toISOString()}`);
+
     // Check if must speak after tool use
     if (voiceResponsesEnabled && lastToolUseTimestamp &&
       (!lastSpeakTimestamp || lastSpeakTimestamp < lastToolUseTimestamp)) {
+      debugLog(`[Hook] stop - BLOCKING: must speak after tool use`);
       return {
         decision: 'block',
         reason: 'Assistant must speak after using tools. Please use the speak tool to respond before proceeding.'
@@ -495,6 +517,7 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
 
     // Auto-wait for utterances (only if voice input is active)
     if (voiceInputActive) {
+      debugLog(`[Hook] stop - Voice input active, starting async auto-wait...`);
       return (async () => {
         try {
           debugLog(`[Stop Hook] Auto-calling wait_for_utterance...`);
@@ -503,6 +526,7 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
 
           // If error (voice input not active), treat as no utterances found
           if (!data.success && data.error) {
+            debugLog(`[Stop Hook] Wait failed with error: ${data.error}`);
             return {
               decision: 'approve' as const,
               reason: data.error
@@ -511,6 +535,7 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
 
           // If utterances were found, block and return them
           if (data.utterances && data.utterances.length > 0) {
+            debugLog(`[Stop Hook] BLOCKING with ${data.utterances.length} utterances from wait`);
             return {
               decision: 'block' as const,
               reason: formatVoiceUtterances(data.utterances)
@@ -518,6 +543,7 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
           }
 
           // If no utterances found (including when voice was deactivated), approve stop
+          debugLog(`[Stop Hook] No utterances found during wait, approving stop`);
           return {
             decision: 'approve' as const,
             reason: data.message || 'No utterances found during wait'
@@ -533,6 +559,7 @@ function handleHookRequest(attemptedAction: 'tool' | 'speak' | 'stop' | 'post-to
       })();
     }
 
+    debugLog(`[Hook] stop - Voice input not active, approving stop`);
     return {
       decision: 'approve',
       reason: 'No utterances since last timeout'
