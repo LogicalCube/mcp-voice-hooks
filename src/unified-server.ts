@@ -6,7 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { debugLog } from './debug.js';
@@ -25,6 +25,7 @@ const HTTP_PORT = process.env.MCP_VOICE_HOOKS_PORT ? parseInt(process.env.MCP_VO
 
 // Promisified exec for async/await
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Function to play a sound notification
 async function playNotificationSound() {
@@ -866,10 +867,20 @@ app.post('/api/speak-system', async (req: Request, res: Response) => {
     return;
   }
 
+  // Validate rate parameter (0.5x to 1.5x normal speed: 75-225 WPM)
+  // Normal speech is ~150 WPM, so this allows reasonable speed variation
+  if (typeof rate !== 'number' || rate < 75 || rate > 225) {
+    res.status(400).json({
+      error: 'Rate must be a number between 75 and 225 (words per minute)'
+    });
+    return;
+  }
+
   try {
     // Execute text-to-speech using macOS say command
     // Note: Mac say command doesn't support volume control
-    await execAsync(`say -r ${rate} "${text.replace(/"/g, '\\"')}"`);
+    // Using execFile to prevent shell injection attacks
+    await execFileAsync('say', ['-r', String(rate), text]);
     debugLog(`[Speak System] Spoke text using macOS say: "${text}" (rate: ${rate})`);
 
     res.json({

@@ -409,7 +409,17 @@ export class TestServer {
         return;
       }
 
+      // Validate rate parameter (0.5x to 1.5x normal speed: 75-225 WPM)
+      // Normal speech is ~150 WPM, so this allows reasonable speed variation
+      if (typeof rate !== 'number' || rate < 75 || rate > 225) {
+        res.status(400).json({
+          error: 'Rate must be a number between 75 and 225 (words per minute)'
+        });
+        return;
+      }
+
       try {
+        // Mock TTS execution - don't actually call say command in tests
         await execAsync(`say -r ${rate} "${text.replace(/"/g, '\\"')}"`);
 
         res.json({

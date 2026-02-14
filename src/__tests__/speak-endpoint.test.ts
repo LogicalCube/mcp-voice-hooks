@@ -170,13 +170,13 @@ describe('Speak Endpoint Integration Tests', () => {
       });
     });
 
-    it('should accept custom rate parameter', async () => {
+    it('should accept custom rate parameter within valid range', async () => {
       const response = await fetch(`${server.url}/api/speak-system`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: 'Test with custom rate',
-          rate: 300
+          rate: 200
         })
       });
 
@@ -187,6 +187,84 @@ describe('Speak Endpoint Integration Tests', () => {
         success: true,
         message: 'Text spoken successfully via system voice'
       });
+    });
+
+    it('should reject rate below minimum (75 WPM)', async () => {
+      const response = await fetch(`${server.url}/api/speak-system`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Test with low rate',
+          rate: 50
+        })
+      });
+
+      const data = await response.json() as any;
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({
+        error: 'Rate must be a number between 75 and 225 (words per minute)'
+      });
+    });
+
+    it('should reject rate above maximum (225 WPM)', async () => {
+      const response = await fetch(`${server.url}/api/speak-system`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Test with high rate',
+          rate: 300
+        })
+      });
+
+      const data = await response.json() as any;
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({
+        error: 'Rate must be a number between 75 and 225 (words per minute)'
+      });
+    });
+
+    it('should reject non-numeric rate parameter', async () => {
+      const response = await fetch(`${server.url}/api/speak-system`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Test with invalid rate',
+          rate: 'fast'
+        })
+      });
+
+      const data = await response.json() as any;
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({
+        error: 'Rate must be a number between 75 and 225 (words per minute)'
+      });
+    });
+
+    it('should accept boundary values (75 and 225 WPM)', async () => {
+      // Test minimum boundary
+      let response = await fetch(`${server.url}/api/speak-system`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Test at minimum rate',
+          rate: 75
+        })
+      });
+      expect(response.status).toBe(200);
+
+      // Test maximum boundary
+      response = await fetch(`${server.url}/api/speak-system`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Test at maximum rate',
+          rate: 225
+        })
+      });
+      expect(response.status).toBe(200);
     });
   });
 });
